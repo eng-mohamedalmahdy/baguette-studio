@@ -1,0 +1,7 @@
+build/
+.gradle/
+.idea/
+.kotlin/
+src/main/resources/baguette/*.tar.gz
+.intellijPlatform/
+.DS_Store

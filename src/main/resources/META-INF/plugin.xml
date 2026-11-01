@@ -1,0 +1,20 @@
+<idea-plugin>
+  <id>dev.baguettestudio</id>
+  <name>iOS Simulator (Baguette)</name>
+  <vendor>baguette-studio</vendor>
+  <description><![CDATA[
+    Streams and controls the iOS Simulator inside Android Studio via the
+    <a href="https://github.com/MainActorDev/Baguette">Baguette</a> CLI (macOS, Apple Silicon, Xcode 26+).
+    Requires <code>brew install baguette</code>.
+  ]]></description>
+  <depends>com.intellij.modules.platform</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <toolWindow id="iOS Simulator"
+                anchor="right"
+                secondary="false"
+                icon="AllIcons.Nodes.Deploy"
+                factoryClass="dev.baguettestudio.SimulatorToolWindowFactory"/>
+    <notificationGroup id="Baguette" displayType="BALLOON"/>
+  </extensions>
+</idea-plugin>

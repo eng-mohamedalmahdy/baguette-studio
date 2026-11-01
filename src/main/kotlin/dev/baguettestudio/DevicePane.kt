@@ -6,16 +6,24 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.invokeLater
 import com.intellij.openapi.components.service
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionToolbar
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.actionSystem.impl.ActionButton
+import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
-import java.awt.FlowLayout
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
 import javax.swing.DefaultComboBoxModel
-import javax.swing.JButton
 import javax.swing.JPanel
 
 class DevicePane(
@@ -35,27 +43,54 @@ class DevicePane(
     private var updating = false
     private val canvas = ScreenCanvas { json, droppable -> client?.send(json, droppable) }
 
-    private val bootBtn = JButton("Boot")
 
     val selectedUdid: String? get() = (combo.selectedItem as? Sim)?.udid
 
     init {
-        val bar = JPanel(FlowLayout(FlowLayout.LEFT, 4, 2))
-        bar.add(combo)
-        bar.add(iconButton("Refresh devices", AllIcons.Actions.Refresh) { refresh() })
-        bar.add(bootBtn.also { it.addActionListener { bootSelected() } })
-        bar.add(iconButton("Home", AllIcons.Nodes.HomeFolder) { button("swipe-to-home") })
-        bar.add(iconButton("App switcher", AllIcons.Actions.SplitVertically) { button("swipe-to-app-switcher") })
-        bar.add(iconButton("Lock", AllIcons.Nodes.Locked) { button("lock") })
-        bar.add(iconButton("Close this device view", AllIcons.Actions.Close) { onClose(this) })
-        add(bar, BorderLayout.NORTH)
+        // Header: device picker stretches, close button is pinned right so it is never clipped.
+        val header = JPanel(BorderLayout(4, 0)).apply {
+            border = JBUI.Borders.empty(2, 4)
+            add(combo, BorderLayout.CENTER)
+            add(
+                ActionButton(
+                    action("Close this device view", AllIcons.Actions.Close) { onClose(this@DevicePane) },
+                    null, "DevicePaneHeader", ActionToolbar.DEFAULT_MINIMUM_BUTTON_SIZE,
+                ),
+                BorderLayout.EAST,
+            )
+        }
+        val group = DefaultActionGroup(
+            action("Refresh devices", AllIcons.Actions.Refresh) { refresh() },
+            action("Boot selected simulator", AllIcons.Actions.Execute, enabled = { !(selectedSim()?.booted ?: true) }) { bootSelected() },
+            Separator.getInstance(),
+            action("Home", AllIcons.Nodes.HomeFolder, enabled = ::streaming) { button("swipe-to-home") },
+            action("App switcher", AllIcons.Actions.SplitVertically, enabled = ::streaming) { button("swipe-to-app-switcher") },
+            action("Lock", AllIcons.Nodes.Locked, enabled = ::streaming) { button("lock") },
+            action("Volume up", AllIcons.Actions.ArrowExpand, enabled = ::streaming) { button("volume-up") },
+            action("Volume down", AllIcons.Actions.ArrowCollapse, enabled = ::streaming) { button("volume-down") },
+        )
+        val toolbar = ActionManager.getInstance().createActionToolbar("BaguetteDevice", group, true).apply {
+            targetComponent = this@DevicePane
+        }
+        val north = JPanel(BorderLayout()).apply {
+            add(header, BorderLayout.NORTH)
+            add(toolbar.component, BorderLayout.CENTER)
+        }
+        add(north, BorderLayout.NORTH)
         add(canvas, BorderLayout.CENTER)
         combo.addActionListener { if (!updating) connectSelected() }
         preferredSize = java.awt.Dimension(340, 720)
     }
 
-    private fun iconButton(tip: String, icon: javax.swing.Icon, run: () -> Unit) =
-        JButton(icon).apply { toolTipText = tip; addActionListener { run() } }
+    private fun selectedSim() = combo.selectedItem as? Sim
+    private fun streaming() = client != null
+
+    private fun action(text: String, icon: javax.swing.Icon, enabled: () -> Boolean = { true }, run: () -> Unit) =
+        object : AnAction(text, text, icon), DumbAware {
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+            override fun update(e: AnActionEvent) { e.presentation.isEnabled = enabled() }
+            override fun actionPerformed(e: AnActionEvent) = run()
+        }
 
     private fun button(name: String) = client?.send("""{"type":"button","button":"$name"}""")
 
@@ -99,7 +134,6 @@ class DevicePane(
     private fun connectSelected() {
         client?.close(); client = null
         val sim = combo.selectedItem as? Sim ?: return status("No simulators found")
-        bootBtn.isEnabled = !sim.booted
         if (!sim.booted) return status("${sim.name} is ${sim.state}. Press Boot.")
         canvas.image = null
         status("Connecting…")

@@ -61,6 +61,7 @@ class SimulatorPanel : JPanel(BorderLayout()), Disposable {
 
     private fun removePane(pane: DevicePane) {
         panes.remove(pane)
+        pane.shutdownIfEnabled(panes.mapNotNull { it.selectedUdid }.toSet())
         row.remove(pane)
         pane.dispose()
         row.revalidate()

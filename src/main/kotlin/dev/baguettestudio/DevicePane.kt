@@ -13,6 +13,8 @@ import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.ui.ComboBox
@@ -62,12 +64,22 @@ class DevicePane(
         val group = DefaultActionGroup(
             action("Refresh devices", AllIcons.Actions.Refresh) { refresh() },
             action("Boot selected simulator", AllIcons.Actions.Execute, enabled = { !(selectedSim()?.booted ?: true) }) { bootSelected() },
+            action("Shut down selected simulator", AllIcons.Actions.Suspend, enabled = { selectedSim()?.booted == true }) { shutdownSelected() },
             Separator.getInstance(),
             action("Home", AllIcons.Nodes.HomeFolder, enabled = ::streaming) { button("swipe-to-home") },
             action("App switcher", AllIcons.Actions.SplitVertically, enabled = ::streaming) { button("swipe-to-app-switcher") },
             action("Lock", DeviceIcons.lock, enabled = ::streaming) { button("lock") },
             action("Volume up", DeviceIcons.volumeUp, enabled = ::streaming) { button("volume-up") },
             action("Volume down", DeviceIcons.volumeDown, enabled = ::streaming) { button("volume-down") },
+            Separator.getInstance(),
+            object : ToggleAction("Shut down simulator when closing this view"), DumbAware {
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT
+                override fun isSelected(e: AnActionEvent) = shutdownOnClose
+                override fun setSelected(e: AnActionEvent, state: Boolean) {
+                    shutdownOnClose = state
+                    PropertiesComponent.getInstance().setValue(PREF_SHUTDOWN_ON_CLOSE, state, true)
+                }
+            }.apply { templatePresentation.icon = AllIcons.Actions.Exit },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar("BaguetteDevice", group, true).apply {
             targetComponent = this@DevicePane
@@ -81,6 +93,8 @@ class DevicePane(
         combo.addActionListener { if (!updating) connectSelected() }
         preferredSize = java.awt.Dimension(340, 720)
     }
+
+    private var shutdownOnClose = PropertiesComponent.getInstance().getBoolean(PREF_SHUTDOWN_ON_CLOSE, true)
 
     private fun selectedSim() = combo.selectedItem as? Sim
     private fun streaming() = client != null
@@ -160,7 +174,35 @@ class DevicePane(
         }
     }
 
+    private fun postShutdown(udid: String, then: () -> Unit = {}) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                http.send(
+                    HttpRequest.newBuilder(URI("${server.baseUrl}/simulators/$udid/shutdown"))
+                        .POST(HttpRequest.BodyPublishers.noBody()).build(),
+                    HttpResponse.BodyHandlers.discarding()
+                )
+            } catch (_: Exception) { }
+            then()
+        }
+    }
+
+    private fun shutdownSelected() {
+        val sim = selectedSim() ?: return
+        client?.close(); client = null
+        status("Shutting down ${sim.name}…")
+        postShutdown(sim.udid) { refresh() }
+    }
+
+    /** Called when the pane is closed. Skips the shutdown if another pane still shows this device. */
+    fun shutdownIfEnabled(stillUsed: Set<String>) {
+        val sim = selectedSim() ?: return
+        if (shutdownOnClose && sim.booted && sim.udid !in stillUsed) postShutdown(sim.udid)
+    }
+
     override fun dispose() {
         client?.close(); client = null
     }
 }
+
+private const val PREF_SHUTDOWN_ON_CLOSE = "baguettestudio.shutdownOnClose"

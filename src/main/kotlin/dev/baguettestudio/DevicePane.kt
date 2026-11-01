@@ -65,9 +65,9 @@ class DevicePane(
             Separator.getInstance(),
             action("Home", AllIcons.Nodes.HomeFolder, enabled = ::streaming) { button("swipe-to-home") },
             action("App switcher", AllIcons.Actions.SplitVertically, enabled = ::streaming) { button("swipe-to-app-switcher") },
-            action("Lock", AllIcons.Nodes.Locked, enabled = ::streaming) { button("lock") },
-            action("Volume up", AllIcons.Actions.ArrowExpand, enabled = ::streaming) { button("volume-up") },
-            action("Volume down", AllIcons.Actions.ArrowCollapse, enabled = ::streaming) { button("volume-down") },
+            action("Lock", DeviceIcons.lock, enabled = ::streaming) { button("lock") },
+            action("Volume up", DeviceIcons.volumeUp, enabled = ::streaming) { button("volume-up") },
+            action("Volume down", DeviceIcons.volumeDown, enabled = ::streaming) { button("volume-down") },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar("BaguetteDevice", group, true).apply {
             targetComponent = this@DevicePane

@@ -13,7 +13,7 @@
     <toolWindow id="iOS Simulator"
                 anchor="right"
                 secondary="false"
-                icon="AllIcons.Nodes.Deploy"
+                icon="/icons/simulator.svg"
                 factoryClass="dev.baguettestudio.SimulatorToolWindowFactory"/>
     <notificationGroup id="Baguette" displayType="BALLOON"/>
   </extensions>

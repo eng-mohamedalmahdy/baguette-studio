@@ -31,6 +31,7 @@ import javax.swing.JPanel
 class DevicePane(
     private val onClose: (DevicePane) -> Unit,
     private val otherSelected: (DevicePane) -> Set<String>,
+    private val onAspect: (DevicePane, Double) -> Unit = { _, _ -> },
 ) : JPanel(BorderLayout()), Disposable {
     private data class Sim(val udid: String, val name: String, val state: String, val runtime: String) {
         val booted get() = state == "Booted"
@@ -67,7 +68,12 @@ class DevicePane(
             action("Shut down selected simulator", AllIcons.Actions.Suspend, enabled = { selectedSim()?.booted == true }) { shutdownSelected() },
             Separator.getInstance(),
             action("Home", AllIcons.Nodes.HomeFolder, enabled = ::streaming) { button("swipe-to-home") },
+            action("Back gesture, LTR (swipe from left edge)", AllIcons.Actions.Back, enabled = ::streaming) { canvas.backGesture(rtl = false) },
+            action("Back gesture, RTL (swipe from right edge)", AllIcons.Actions.Forward, enabled = ::streaming) { canvas.backGesture(rtl = true) },
             action("App switcher", AllIcons.Actions.SplitVertically, enabled = ::streaming) { button("swipe-to-app-switcher") },
+            action("Toggle software keyboard", AllIcons.Nodes.Services, enabled = ::streaming) { button("software-keyboard") },
+            action("Notification center", AllIcons.Ide.Notification.NoEvents, enabled = ::streaming) { button("pull-down-to-notification-center") },
+            action("Action button", AllIcons.Actions.Lightning, enabled = ::streaming) { button("action") },
             action("Lock", DeviceIcons.lock, enabled = ::streaming) { button("lock") },
             action("Volume up", DeviceIcons.volumeUp, enabled = ::streaming) { button("volume-up") },
             action("Volume down", DeviceIcons.volumeDown, enabled = ::streaming) { button("volume-down") },
@@ -80,6 +86,11 @@ class DevicePane(
                     PropertiesComponent.getInstance().setValue(PREF_SHUTDOWN_ON_CLOSE, state, true)
                 }
             }.apply { templatePresentation.icon = AllIcons.Actions.Exit },
+            object : ToggleAction("Hide Simulator.app when a run launches it"), DumbAware {
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT
+                override fun isSelected(e: AnActionEvent) = SimulatorHider.enabled
+                override fun setSelected(e: AnActionEvent, state: Boolean) { SimulatorHider.enabled = state }
+            }.apply { templatePresentation.icon = AllIcons.Actions.ToggleVisibility },
         )
         val toolbar = ActionManager.getInstance().createActionToolbar("BaguetteDevice", group, true).apply {
             targetComponent = this@DevicePane
@@ -92,6 +103,7 @@ class DevicePane(
         add(canvas, BorderLayout.CENTER)
         combo.addActionListener { if (!updating) connectSelected() }
         preferredSize = java.awt.Dimension(340, 720)
+        minimumSize = java.awt.Dimension(220, 300)
     }
 
     private var shutdownOnClose = PropertiesComponent.getInstance().getBoolean(PREF_SHUTDOWN_ON_CLOSE, true)
@@ -153,7 +165,11 @@ class DevicePane(
         status("Connecting…")
         client = StreamClient(
             server.baseUrl, sim.udid,
-            onFrame = { img -> canvas.image = img; canvas.repaint() },
+            onFrame = { img ->
+                val first = canvas.image == null || canvas.image!!.width != img.width || canvas.image!!.height != img.height
+                canvas.image = img; canvas.repaint()
+                if (first) invokeLater { onAspect(this, img.width.toDouble() / img.height) }
+            },
             onStatus = ::status,
         )
         canvas.requestFocusInWindow()

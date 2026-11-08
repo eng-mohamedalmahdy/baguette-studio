@@ -30,7 +30,7 @@ class ScreenCanvas(private val send: (json: String, droppable: Boolean) -> Unit)
                 requestFocusInWindow()
                 val p = map(e) ?: return
                 dragging = true
-                edge = edgeFor(p.second)
+                edge = edgeFor(p.first, p.second)
                 send(touch("touch1-down", p), false)
             }
             override fun mouseDragged(e: MouseEvent) {
@@ -74,15 +74,39 @@ class ScreenCanvas(private val send: (json: String, droppable: Boolean) -> Unit)
         })
     }
 
+    /** iOS back gesture: swipe in from the left edge (LTR) or right edge (RTL) across ~45% of the screen. */
+    fun backGesture(rtl: Boolean) {
+        val img = image ?: return
+        val w = img.width; val h = img.height
+        val y = h / 2
+        val steps = 8
+        val dir = if (rtl) -1 else 1
+        val startX = if (rtl) w - 3 else 2
+        val edgeName = if (rtl) "right" else "left"
+        Thread({
+            fun msg(t: String, x: Int) =
+                """{"type":"$t","x":$x,"y":$y,"width":$w,"height":$h,"edge":"$edgeName"}"""
+            send(msg("touch1-down", startX), false)
+            for (i in 1..steps) {
+                Thread.sleep(16)
+                send(msg("touch1-move", startX + dir * (w * 0.45 * i / steps).toInt()), false)
+            }
+            send(msg("touch1-up", startX + dir * (w * 0.45).toInt()), false)
+        }, "baguette-back-gesture").apply { isDaemon = true }.start()
+    }
+
     private fun touch(type: String, p: Pair<Int, Int>): String {
         val img = image!!
         val e = edge?.let { ""","edge":"$it"""" } ?: ""
         return """{"type":"$type","x":${p.first},"y":${p.second},"width":${img.width},"height":${img.height}$e}"""
     }
 
-    private fun edgeFor(y: Int): String? {
+    private fun edgeFor(x: Int, y: Int): String? {
         val h = image?.height ?: return null
+        val w = image?.width ?: return null
         return when {
+            x < w * 0.03 -> "left"
+            x > w * 0.97 -> "right"
             y > h * 0.93 -> "bottom"
             y < h * 0.07 -> "top"
             else -> null

@@ -3,11 +3,33 @@
   <name>iOS Simulator (Baguette)</name>
   <vendor>baguette-studio</vendor>
   <description><![CDATA[
-    Streams and controls the iOS Simulator inside Android Studio via the
-    <a href="https://github.com/MainActorDev/Baguette">Baguette</a> CLI (macOS, Apple Silicon, Xcode 26+).
-    Requires <code>brew install baguette</code>.
+    Streams and controls the iOS Simulator inside Android Studio, powered by a bundled
+    <a href="https://github.com/tddworks/baguette">Baguette</a> (Apache-2.0). No separate install needed.
+    <ul>
+      <li>Multiple resizable device panes side by side</li>
+      <li>Touch, scroll, typing and hardware-key input</li>
+      <li>Home, app switcher, lock, volume, action button, notification center, software keyboard</li>
+      <li>Back gesture buttons for LTR and RTL (Arabic/Hebrew) apps</li>
+      <li>Boot and shut down simulators; optionally hides Simulator.app when a run launches it</li>
+    </ul>
+    Requires macOS on Apple Silicon and Xcode 26 (iOS 26 simulators). Intel Macs are not supported.
   ]]></description>
+  <change-notes><![CDATA[
+    <b>0.2.0</b>
+    <ul>
+      <li>Back gesture buttons for LTR and RTL apps; left/right edge drags are now real edge swipes</li>
+      <li>Toolbar: software keyboard, notification center, action button</li>
+      <li>Resizable panes via draggable splitters</li>
+      <li>Tool window auto-grows to fit the device aspect ratio</li>
+      <li>Hide Simulator.app when a run launches it (toggleable)</li>
+      <li>Clear error on unsupported (Intel) CPUs</li>
+    </ul>
+  ]]></change-notes>
   <depends>com.intellij.modules.platform</depends>
+
+  <applicationListeners>
+    <listener class="dev.baguettestudio.SimulatorHideListener" topic="com.intellij.execution.ExecutionListener"/>
+  </applicationListeners>
 
   <extensions defaultExtensionNs="com.intellij">
     <toolWindow id="iOS Simulator"

@@ -17,7 +17,7 @@ class BaguetteServer : Disposable {
     val simulatorsUrl get() = "$baseUrl/simulators"
 
     fun isUp(): Boolean = try {
-        (URI("$baseUrl/simulators").toURL().openConnection() as HttpURLConnection).run {
+        (URI(simulatorsUrl).toURL().openConnection() as HttpURLConnection).run {
             connectTimeout = 400
             readTimeout = 800
             responseCode in 200..399
@@ -70,6 +70,10 @@ class BaguetteServer : Disposable {
     @Synchronized
     fun ensureRunning(): String? {
         if (isUp()) return null
+        val arch = System.getProperty("os.arch")
+        if (arch != "aarch64" && arch != "arm64") {
+            return "Unsupported CPU ($arch). Baguette ships Apple Silicon (arm64) builds only; Intel Macs are not supported."
+        }
         val bin = findBinary() ?: return "baguette not found. bundled copy missing and none installed (brew install baguette)"
         thisLogger().info("Starting ${bin.path} serve")
         process = try {

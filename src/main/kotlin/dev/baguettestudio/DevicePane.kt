@@ -14,6 +14,10 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.Separator
 import com.intellij.openapi.actionSystem.ToggleAction
+import com.intellij.ide.actions.RevealFileAction
+import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.actionSystem.impl.ActionButton
 import com.intellij.openapi.project.DumbAware
@@ -72,8 +76,31 @@ class DevicePane(
             action("Back gesture, RTL (swipe from right edge)", AllIcons.Actions.Forward, enabled = ::streaming) { canvas.backGesture(rtl = true) },
             action("App switcher", AllIcons.Actions.SplitVertically, enabled = ::streaming) { button("swipe-to-app-switcher") },
             action("Toggle software keyboard", AllIcons.Nodes.Services, enabled = ::streaming) { button("software-keyboard") },
-            action("Notification center", AllIcons.Ide.Notification.NoEvents, enabled = ::streaming) { button("pull-down-to-notification-center") },
+            action("Notification center (swipe down from top)", DeviceIcons.bell, enabled = ::streaming) { canvas.notificationGesture() },
             action("Action button", AllIcons.Actions.Lightning, enabled = ::streaming) { button("action") },
+            action("Rotate device 90° (simulator orientation)", DeviceIcons.rotateDevice, enabled = ::streaming) { rotate() },
+            action("Rotate view 90° (this window only, device untouched)", DeviceIcons.rotateView, enabled = ::streaming) { rotateView() },
+            action("Screenshot (as shown) to ~/Pictures/BaguetteStudio", DeviceIcons.camera, enabled = ::streaming) { screenshot() },
+            action("Shake", AllIcons.Actions.Refresh, enabled = ::streaming) { post("shake") },
+            toggle("Dark mode", AllIcons.Actions.Preview, enabled = ::streaming, selected = { dark }) { setDark(it) },
+            object : DefaultActionGroup("iPhone Duo Hinge", true), DumbAware {
+                init {
+                    templatePresentation.icon = AllIcons.Actions.SplitHorizontally
+                    add(action("Close hinge (0°)", AllIcons.Actions.Collapseall) { hinge("closed") })
+                    add(action("Open hinge (130°)", AllIcons.Actions.Expandall) { hinge("open") })
+                    add(action("Flat (180°)", AllIcons.Actions.MoveToButton) { hinge("flat") })
+                }
+                override fun getActionUpdateThread() = ActionUpdateThread.EDT
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isVisible = foldable
+                    e.presentation.isEnabled = streaming()
+                }
+            },
+            toggle(
+                "Record screen to ~/Movies/BaguetteStudio", AllIcons.Debugger.Db_set_breakpoint,
+                enabled = ::streaming, selected = { recorder != null },
+            ) { if (it) startRecording() else stopRecording() },
+            Separator.getInstance(),
             action("Lock", DeviceIcons.lock, enabled = ::streaming) { button("lock") },
             action("Volume up", DeviceIcons.volumeUp, enabled = ::streaming) { button("volume-up") },
             action("Volume down", DeviceIcons.volumeDown, enabled = ::streaming) { button("volume-down") },
@@ -118,6 +145,114 @@ class DevicePane(
             override fun actionPerformed(e: AnActionEvent) = run()
         }
 
+    private fun toggle(
+        text: String, icon: javax.swing.Icon, enabled: () -> Boolean = { true },
+        selected: () -> Boolean, set: (Boolean) -> Unit,
+    ) = object : ToggleAction(text, text, icon), DumbAware {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        override fun update(e: AnActionEvent) { super.update(e); e.presentation.isEnabled = enabled() }
+        override fun isSelected(e: AnActionEvent) = selected()
+        override fun setSelected(e: AnActionEvent, state: Boolean) = set(state)
+    }
+
+    @Volatile private var foldable = false
+    @Volatile private var dark = false
+    @Volatile private var orientation = 0
+    private var recorder: Process? = null
+    private var recordingFile: File? = null
+
+    private val orientations = listOf("portrait", "landscape-left", "portrait-upside-down", "landscape-right")
+
+    /** Fire-and-forget POST to `/simulators/<udid>/<path>` off the EDT. */
+    private fun post(path: String, json: String? = null, then: () -> Unit = {}) {
+        val udid = selectedUdid ?: return
+        ApplicationManager.getApplication().executeOnPooledThread {
+            try {
+                val req = HttpRequest.newBuilder(URI("${server.baseUrl}/simulators/$udid/$path"))
+                    .apply {
+                        if (json != null) header("Content-Type", "application/json")
+                    }
+                    .POST(if (json != null) HttpRequest.BodyPublishers.ofString(json) else HttpRequest.BodyPublishers.noBody())
+                    .build()
+                http.send(req, HttpResponse.BodyHandlers.discarding())
+            } catch (e: Exception) { status("Request failed: ${e.message}"); return@executeOnPooledThread }
+            then()
+        }
+    }
+
+    private fun rotate() {
+        orientation = (orientation + 1) % orientations.size
+        post("orientation?value=${orientations[orientation]}")
+    }
+
+    private fun rotateView() {
+        canvas.viewRotation = (canvas.viewRotation + 1) % 4
+        canvas.repaint()
+        canvas.displayAspect()?.let { onAspect(this, it) }
+    }
+
+    private fun screenshot() {
+        val img = canvas.snapshot() ?: return status("No frame to capture")
+        val sim = selectedSim()
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val dir = File(System.getProperty("user.home"), "Pictures/BaguetteStudio").apply { mkdirs() }
+            val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+            val name = (sim?.name ?: "device").replace(Regex("[^A-Za-z0-9._-]"), "_")
+            val file = File(dir, "$name-$stamp.png")
+            try { javax.imageio.ImageIO.write(img, "png", file) } catch (e: Exception) { return@executeOnPooledThread status("Screenshot failed: ${e.message}") }
+            invokeLater { RevealFileAction.openFile(file) }
+        }
+    }
+
+    private fun hinge(pose: String) = post("hinge?pose=$pose")
+
+    private fun setDark(on: Boolean) {
+        dark = on
+        post("interface", """{"appearance":"${if (on) "dark" else "light"}"}""")
+    }
+
+    /** Foldable (iPhone Duo) and appearance state of the selected simulator, read when we connect. */
+    private fun probeDevice(udid: String) {
+        foldable = false; dark = false; orientation = 0
+        ApplicationManager.getApplication().executeOnPooledThread {
+            fun get(path: String) = try {
+                JsonParser.parseString(
+                    http.send(
+                        HttpRequest.newBuilder(URI("${server.baseUrl}/simulators/$udid/$path")).GET().build(),
+                        HttpResponse.BodyHandlers.ofString()
+                    ).body()
+                ).asJsonObject
+            } catch (_: Exception) { null }
+            get("hinge")?.let { foldable = it["foldable"]?.asBoolean == true }
+            get("interface.json")?.let { dark = it["appearance"]?.asString == "dark" }
+        }
+    }
+
+    private fun startRecording() {
+        val sim = selectedSim() ?: return
+        val bin = server.findBinary() ?: return status("baguette binary not found")
+        val dir = File(System.getProperty("user.home"), "Movies/BaguetteStudio").apply { mkdirs() }
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        val out = File(dir, "${sim.name.replace(Regex("[^A-Za-z0-9._-]"), "_")}-$stamp.mp4")
+        recorder = try {
+            ProcessBuilder(bin.path, "record", "--udid", sim.udid, "--output", out.path)
+                .redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start()
+        } catch (e: Exception) { status("Record failed: ${e.message}"); return }
+        recordingFile = out
+    }
+
+    private fun stopRecording() {
+        val proc = recorder ?: return
+        val file = recordingFile
+        recorder = null; recordingFile = null
+        ApplicationManager.getApplication().executeOnPooledThread {
+            // SIGINT lets baguette flush a playable file.
+            runCatching { ProcessBuilder("/bin/kill", "-INT", proc.pid().toString()).start().waitFor() }
+            if (!proc.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) proc.destroy()
+            if (file != null && file.exists()) invokeLater { RevealFileAction.openFile(file) }
+        }
+    }
+
     private fun button(name: String) = client?.send("""{"type":"button","button":"$name"}""")
 
     fun status(msg: String) = invokeLater { canvas.message = msg; canvas.image = null; canvas.repaint() }
@@ -159,8 +294,10 @@ class DevicePane(
 
     private fun connectSelected() {
         client?.close(); client = null
+        stopRecording()
         val sim = combo.selectedItem as? Sim ?: return status("No simulators found")
         if (!sim.booted) return status("${sim.name} is ${sim.state}. Press Boot.")
+        probeDevice(sim.udid)
         canvas.image = null
         status("Connecting…")
         client = StreamClient(
@@ -168,7 +305,7 @@ class DevicePane(
             onFrame = { img ->
                 val first = canvas.image == null || canvas.image!!.width != img.width || canvas.image!!.height != img.height
                 canvas.image = img; canvas.repaint()
-                if (first) invokeLater { onAspect(this, img.width.toDouble() / img.height) }
+                if (first) invokeLater { onAspect(this, canvas.displayAspect() ?: (img.width.toDouble() / img.height)) }
             },
             onStatus = ::status,
         )
@@ -217,6 +354,7 @@ class DevicePane(
     }
 
     override fun dispose() {
+        stopRecording()
         client?.close(); client = null
     }
 }

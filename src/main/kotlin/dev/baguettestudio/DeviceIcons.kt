@@ -20,6 +20,38 @@ object DeviceIcons {
         g.fill(RoundRectangle2D.Double(3.0, 7.0, 10.0, 7.5, 2.0, 2.0))
     }
 
+    val bell: Icon = glyph { g ->
+        val body = Path2D.Double().apply {
+            moveTo(3.0, 11.5); lineTo(3.0, 10.5); quadTo(4.5, 9.5, 4.5, 6.5)
+            curveTo(4.5, 3.0, 11.5, 3.0, 11.5, 6.5)
+            quadTo(11.5, 9.5, 13.0, 10.5); lineTo(13.0, 11.5); closePath()
+        }
+        g.fill(body)
+        g.draw(java.awt.geom.Line2D.Double(8.0, 1.8, 8.0, 3.2))
+        g.fill(Arc2D.Double(6.2, 11.0, 3.6, 3.6, 180.0, 180.0, Arc2D.CHORD))
+    }
+
+    /** Phone outline with a curved arrow: rotate the device 90 degrees. */
+    val rotateDevice: Icon = glyph { g ->
+        g.draw(RoundRectangle2D.Double(2.5, 5.5, 6.0, 9.0, 1.5, 1.5))
+        g.draw(Arc2D.Double(6.0, 1.0, 8.0, 8.0, 90.0, -150.0, Arc2D.OPEN))
+        val head = Path2D.Double().apply { moveTo(12.6, 6.6); lineTo(14.6, 7.2); lineTo(13.6, 9.2); closePath() }
+        g.fill(head)
+    }
+
+    /** Circular arrow around a small screen: rotate only the on-screen view. */
+    val rotateView: Icon = glyph { g ->
+        g.draw(Arc2D.Double(2.0, 2.0, 12.0, 12.0, 60.0, 270.0, Arc2D.OPEN))
+        g.fill(Path2D.Double().apply { moveTo(10.5, 0.8); lineTo(14.8, 3.0); lineTo(10.2, 5.2); closePath() })
+        g.fill(RoundRectangle2D.Double(5.5, 5.5, 5.0, 5.0, 1.0, 1.0))
+    }
+
+    val camera: Icon = glyph { g ->
+        g.draw(RoundRectangle2D.Double(1.5, 4.5, 13.0, 9.0, 2.0, 2.0))
+        g.fill(RoundRectangle2D.Double(5.5, 2.5, 5.0, 2.5, 1.0, 1.0))
+        g.draw(java.awt.geom.Ellipse2D.Double(5.2, 6.5, 5.6, 5.6))
+    }
+
     val volumeUp: Icon = glyph { g -> speaker(g); wave(g, 9.5, 3.0); wave(g, 9.5, 5.0) }
     val volumeDown: Icon = glyph { g -> speaker(g); wave(g, 9.5, 3.0) }
 

@@ -5,6 +5,15 @@ import java.awt.Dimension
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.datatransfer.DataFlavor
+import java.awt.dnd.DnDConstants
+import java.awt.dnd.DropTarget
+import java.awt.dnd.DropTargetAdapter
+import java.awt.dnd.DropTargetDragEvent
+import java.awt.dnd.DropTargetDropEvent
+import java.awt.dnd.DropTargetEvent
+import java.io.File
+import javax.swing.Timer
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -51,7 +60,43 @@ class ScreenCanvas(private val send: (json: String, droppable: Boolean) -> Unit)
     private var dragging = false
     private var edge: String? = null
 
+    /** Called on the EDT with files dropped onto the screen. */
+    var onFilesDropped: (List<File>) -> Unit = {}
+
+    /** Transient overlay text (drop progress/result); the frame stays visible underneath. */
+    @Volatile var notice: String? = null
+        set(value) {
+            field = value
+            noticeTimer?.stop()
+            if (value != null) {
+                noticeTimer = Timer(4000) { notice = null }.apply { isRepeats = false; start() }
+            }
+            repaint()
+        }
+    private var noticeTimer: Timer? = null
+    private var dropHover = false
+
     init {
+        dropTarget = DropTarget(this, object : DropTargetAdapter() {
+            override fun dragEnter(e: DropTargetDragEvent) {
+                if (e.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
+                    e.acceptDrag(DnDConstants.ACTION_COPY); dropHover = true; repaint()
+                } else e.rejectDrag()
+            }
+            override fun dragOver(e: DropTargetDragEvent) = e.acceptDrag(DnDConstants.ACTION_COPY)
+            override fun dragExit(e: DropTargetEvent) { dropHover = false; repaint() }
+            override fun drop(e: DropTargetDropEvent) {
+                dropHover = false; repaint()
+                if (!e.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) return e.rejectDrop()
+                e.acceptDrop(DnDConstants.ACTION_COPY)
+                val files = try {
+                    @Suppress("UNCHECKED_CAST")
+                    (e.transferable.getTransferData(DataFlavor.javaFileListFlavor) as List<File>)
+                } catch (_: Exception) { e.dropComplete(false); return }
+                e.dropComplete(true)
+                if (files.isNotEmpty()) onFilesDropped(files)
+            }
+        })
         isOpaque = true
         isFocusable = true
         preferredSize = Dimension(320, 640)
@@ -198,6 +243,24 @@ class ScreenCanvas(private val send: (json: String, droppable: Boolean) -> Unit)
             g2.color = Color.GRAY
             val fm = g2.fontMetrics
             g2.drawString(message, (width - fm.stringWidth(message)) / 2, height / 2)
+        }
+        if (dropHover) {
+            g2.color = Color(0x3574F0).let { Color(it.red, it.green, it.blue, 70) }
+            g2.fillRect(0, 0, width, height)
+            g2.color = Color(0x3574F0)
+            g2.stroke = java.awt.BasicStroke(3f)
+            g2.drawRect(1, 1, width - 3, height - 3)
+        }
+        notice?.let { n ->
+            val fm = g2.fontMetrics
+            val tw = fm.stringWidth(n) + 20
+            val th = fm.height + 10
+            val x = (width - tw) / 2
+            val y = height - th - 12
+            g2.color = Color(0, 0, 0, 200)
+            g2.fillRoundRect(x, y, tw, th, 10, 10)
+            g2.color = Color.WHITE
+            g2.drawString(n, x + 10, y + 5 + fm.ascent)
         }
     }
 
